@@ -103,6 +103,7 @@ Future<void> buildMacOS({
       logger: globals.logger,
       fileSystem: globals.fs,
       plistParser: globals.plistParser,
+      config: globals.config,
     ),
     SwiftPackageManagerGitignoreMigration(flutterProject, globals.logger),
     MetalAPIValidationMigrator.macos(flutterProject.macos, globals.logger),
@@ -111,9 +112,8 @@ Future<void> buildMacOS({
   final migration = ProjectMigration(migrators);
   await migration.run();
 
-  final Directory flutterBuildDir = flutterProject.directory.childDirectory(
-    getMacOSBuildDirectory(),
-  );
+  final String buildDirectoryPath = getMacOSBuildDirectory();
+  final Directory flutterBuildDir = flutterProject.directory.childDirectory(buildDirectoryPath);
   if (!flutterBuildDir.existsSync()) {
     flutterBuildDir.createSync(recursive: true);
   }
@@ -127,6 +127,7 @@ Future<void> buildMacOS({
   final XcodeProjectInfo? projectInfo = await globals.xcodeProjectInterpreter?.getInfo(
     xcodeProject.parent.path,
     projectFilename: xcodeProjectName,
+    buildDirectory: flutterBuildDir,
   );
   final String? scheme = projectInfo?.schemeFor(buildInfo);
   if (scheme == null) {
@@ -164,7 +165,7 @@ Future<void> buildMacOS({
     }
   }
 
-  await processPodsIfNeeded(flutterProject.macos, getMacOSBuildDirectory(), buildInfo.mode);
+  await processPodsIfNeeded(flutterProject.macos, buildDirectoryPath, buildInfo.mode);
   // If the xcfilelists do not exist, create empty version.
   if (!flutterProject.macos.inputFileList.existsSync()) {
     flutterProject.macos.inputFileList.createSync(recursive: true);
@@ -197,16 +198,33 @@ Future<void> buildMacOS({
     HostPlatform.darwin_x64 => 'x86_64',
     _ => throw UnimplementedError('Unsupported platform'),
   };
-  final String destination = buildInfo.isDebug
-      ? 'platform=${XcodeSdk.MacOSX.displayName},arch=$arch'
-      : XcodeSdk.MacOSX.genericPlatform;
+
+  // Determine the build destination
+  final String destination;
+  if (buildInfo.isDebug) {
+    // Debug builds default to current host architecture
+    destination = 'platform=${XcodeSdk.MacOSX.displayName},arch=$arch';
+  } else {
+    // Release builds default to universal binary
+    destination = XcodeSdk.MacOSX.genericPlatform;
+  }
+
+  // Get EXCLUDED_ARCHS from Xcode project build settings
+  // This allows developers to exclude specific architectures (e.g., x86_64)
+  // when dependencies don't support them
+  final String? excludedArches = buildSettings['EXCLUDED_ARCHS'];
 
   try {
+    final List<String> xcodebuildCommandArgs = await globals.xcode!
+        .fetchDependenciesAndGenerateXcodebuildArgs(
+          flutterProject.macos.hostAppRoot.path,
+          globals.fs.directory(buildDirectoryPath),
+          skipPackageUpdatesAndValidation: false,
+        );
     result = await globals.processUtils.stream(
       <String>[
         '/usr/bin/env',
-        'xcrun',
-        'xcodebuild',
+        ...xcodebuildCommandArgs,
         '-workspace',
         xcodeWorkspace.path,
         '-configuration',
@@ -223,6 +241,10 @@ Future<void> buildMacOS({
         'COMPILER_INDEX_STORE_ENABLE=NO',
         if (disabledSandboxEntitlementFile != null)
           'CODE_SIGN_ENTITLEMENTS=${disabledSandboxEntitlementFile.path}',
+        // Pass EXCLUDED_ARCHS from Xcode project to xcodebuild command
+        // This fixes Swift Package Manager not respecting EXCLUDED_ARCHS from the project
+        if (excludedArches != null && excludedArches.trim().isNotEmpty)
+          'EXCLUDED_ARCHS=$excludedArches',
         ...environmentVariablesAsXcodeBuildSettings(globals.platform),
       ],
       trace: true,

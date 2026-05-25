@@ -9,6 +9,7 @@ import 'package:args/command_runner.dart';
 import 'package:file/memory.dart';
 import 'package:flutter_tools/src/base/common.dart';
 import 'package:flutter_tools/src/base/error_handling_io.dart';
+import 'package:flutter_tools/src/base/exit.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
 import 'package:flutter_tools/src/base/io.dart';
 import 'package:flutter_tools/src/base/logger.dart';
@@ -719,55 +720,6 @@ void main() {
         final CommandRunner<void> runner = createTestCommandRunner(ddsCommand);
         await runner.run(<String>['test', '--no-dds']);
         expect(ddsCommand.enableDds, isFalse);
-      },
-      overrides: <Type, Generator>{
-        FileSystem: () => fileSystem,
-        ProcessManager: () => processManager,
-      },
-    );
-
-    testUsingContext(
-      'dds options --disable-dds works, but is deprecated',
-      () async {
-        final ddsCommand = FakeDdsCommand();
-        final CommandRunner<void> runner = createTestCommandRunner(ddsCommand);
-        await runner.run(<String>['test', '--disable-dds']);
-        expect(ddsCommand.enableDds, isFalse);
-        expect(logger.warningText, contains('"--disable-dds" argument is deprecated'));
-      },
-      overrides: <Type, Generator>{
-        FileSystem: () => fileSystem,
-        Logger: () => logger,
-        ProcessManager: () => processManager,
-      },
-    );
-
-    testUsingContext(
-      'dds options --no-disable-dds',
-      () async {
-        final ddsCommand = FakeDdsCommand();
-        final CommandRunner<void> runner = createTestCommandRunner(ddsCommand);
-        await runner.run(<String>['test', '--no-disable-dds']);
-        expect(ddsCommand.enableDds, isTrue);
-        expect(
-          logger.warningText,
-          contains('"--no-disable-dds" argument is deprecated and redundant'),
-        );
-      },
-      overrides: <Type, Generator>{
-        FileSystem: () => fileSystem,
-        Logger: () => logger,
-        ProcessManager: () => processManager,
-      },
-    );
-
-    testUsingContext(
-      'dds options --dds --disable-dds',
-      () async {
-        final ddsCommand = FakeDdsCommand();
-        final CommandRunner<void> runner = createTestCommandRunner(ddsCommand);
-        await runner.run(<String>['test', '--dds', '--disable-dds']);
-        expect(() => ddsCommand.enableDds, throwsToolExit());
       },
       overrides: <Type, Generator>{
         FileSystem: () => fileSystem,
@@ -1593,8 +1545,7 @@ Use the "flutter config" command to enable feature flags.''',
             final fileSystem = MemoryFileSystem.test();
             fileSystem
               ..file('lib/main.dart').createSync(recursive: true)
-              ..file('pubspec.yaml').createSync()
-              ..file('.packages').createSync();
+              ..file('pubspec.yaml').createSync();
             fileSystem.file('config.json')
               ..createSync()
               ..writeAsStringSync('{"FLUTTER_ENABLED_FEATURE_FLAGS": "AlreadySet"}');
@@ -1684,7 +1635,7 @@ class FakeDdsCommand extends FlutterCommand {
 
 class FakeProcessInfo extends Fake implements ProcessInfo {
   @override
-  var maxRss = 0;
+  int maxRss = 0;
 }
 
 class FakeIoProcessSignal extends Fake implements io.ProcessSignal {
@@ -1695,7 +1646,7 @@ class FakeIoProcessSignal extends Fake implements io.ProcessSignal {
 }
 
 class FakeCache extends Fake implements Cache {
-  var artifacts = <Set<DevelopmentArtifact>>[];
+  List<Set<DevelopmentArtifact>> artifacts = <Set<DevelopmentArtifact>>[];
 
   @override
   Future<void> updateAll(Set<DevelopmentArtifact> requiredArtifacts, {bool offline = false}) async {
@@ -1730,7 +1681,7 @@ class FakeSignals implements Signals {
 }
 
 class FakeClock extends Fake implements SystemClock {
-  var times = <int>[];
+  List<int> times = <int>[];
 
   @override
   DateTime now() {

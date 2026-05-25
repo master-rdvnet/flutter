@@ -8,7 +8,6 @@ import 'package:flutter_tools/src/widget_preview/preview_detector.dart';
 import 'package:test/test.dart';
 
 import '../../../../src/common.dart';
-import '../../../../src/context.dart';
 import '../utils/preview_details_matcher.dart';
 import '../utils/preview_detector_test_utils.dart';
 import '../utils/preview_project.dart';
@@ -19,22 +18,13 @@ import '../utils/preview_project.dart';
 // flaky failures.
 
 /// Creates a project with files containing invalid preview applications.
-class BasicProjectWithInvalidPreviews extends WidgetPreviewProject {
+class BasicProjectWithInvalidPreviews extends WidgetPreviewProject with ProjectWithPreviews {
   BasicProjectWithInvalidPreviews._({
     required super.projectRoot,
     required List<String> pathsWithPreviews,
     required List<String> pathsWithoutPreviews,
   }) {
-    final initialSources = <WidgetPreviewSourceFile>[];
-    for (final path in pathsWithPreviews) {
-      initialSources.add((path: path, source: _invalidPreviewContainingFileContents));
-      librariesWithPreviews.add(toPreviewPath(path));
-    }
-    for (final path in pathsWithoutPreviews) {
-      initialSources.add((path: path, source: _emptySource));
-      librariesWithoutPreviews.add(toPreviewPath(path));
-    }
-    initialSources.forEach(writeFile);
+    initialize(pathsWithPreviews: pathsWithPreviews, pathsWithoutPreviews: pathsWithoutPreviews);
   }
 
   static Future<BasicProjectWithInvalidPreviews> create({
@@ -51,27 +41,13 @@ class BasicProjectWithInvalidPreviews extends WidgetPreviewProject {
     return project;
   }
 
-  final librariesWithPreviews = <PreviewPath>{};
-  final librariesWithoutPreviews = <PreviewPath>{};
-
-  /// Adds a file containing previews at [path].
-  void addPreviewContainingFile({required String path}) {
-    writeFile((path: path, source: _invalidPreviewContainingFileContents));
-    final PreviewPath previewPath = toPreviewPath(path);
-    librariesWithoutPreviews.remove(previewPath);
-    librariesWithPreviews.add(previewPath);
-  }
-
-  Map<PreviewPath, List<PreviewDetailsMatcher>> get matcherMapping =>
-      <PreviewPath, List<PreviewDetailsMatcher>>{
-        for (final PreviewPath path in librariesWithPreviews) path: [],
-      };
-
-  static const _emptySource = '''
+  @override
+  final nonPreviewContainingFileContents = '''
 void main() {}
 ''';
 
-  static const _invalidPreviewContainingFileContents = '''
+  @override
+  final previewContainingFileContents = '''
 
 
 @Preview(name: 'Invalid preview on class declaration')
@@ -106,6 +82,9 @@ Widget foo(int bar) => Text('Foo');
 @Preview(name: 'Invalid preview on extension')
 extension on ClassDeclaration {}
 ''';
+
+  @override
+  List<PreviewDetailsMatcher> get expectedPreviewDetails => [];
 }
 
 void main() {
@@ -114,18 +93,11 @@ void main() {
     // Note: we don't use a MemoryFileSystem since we don't have a way to
     // provide it to package:analyzer APIs without writing a significant amount
     // of wrapper logic.
-    late PreviewDetector previewDetector;
     late BasicProjectWithInvalidPreviews project;
 
-    setUp(() {
-      previewDetector = createTestPreviewDetector();
-    });
-
-    tearDown(() async {
-      await previewDetector.dispose();
-    });
-
-    testUsingContext('ignores invalid previews in existing files', () async {
+    testPreviewDetector('ignores invalid previews in existing files', (
+      PreviewDetector previewDetector,
+    ) async {
       project = await BasicProjectWithInvalidPreviews.create(
         projectRoot: previewDetector.projectRoot,
         pathsWithPreviews: <String>['foo.dart'],
@@ -135,7 +107,9 @@ void main() {
       expectContainsPreviews(mapping, project.matcherMapping);
     });
 
-    testUsingContext('ignores invalid previews in updated files', () async {
+    testPreviewDetector('ignores invalid previews in updated files', (
+      PreviewDetector previewDetector,
+    ) async {
       project = await BasicProjectWithInvalidPreviews.create(
         projectRoot: previewDetector.projectRoot,
         pathsWithPreviews: <String>[],
@@ -155,7 +129,9 @@ void main() {
       );
     });
 
-    testUsingContext('ignores invalid previews in newly added files', () async {
+    testPreviewDetector('ignores invalid previews in newly added files', (
+      PreviewDetector previewDetector,
+    ) async {
       project = await BasicProjectWithInvalidPreviews.create(
         projectRoot: previewDetector.projectRoot,
         pathsWithPreviews: <String>[],
